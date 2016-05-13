@@ -16,6 +16,12 @@ import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.ListView;
 import android.widget.TextView;
+import android.widget.Toast;
+
+import com.firebase.client.DataSnapshot;
+import com.firebase.client.Firebase;
+import com.firebase.client.FirebaseError;
+import com.firebase.client.ValueEventListener;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -28,14 +34,17 @@ import java.net.URL;
 import java.util.ArrayList;
 
 public class MainActivity extends AppCompatActivity {
-    final String URL_TOP = "https://hacker-news.firebaseio.com/v0/topstories.json";
-    final String URL_start = "https://hacker-news.firebaseio.com/v0/item/";
-    final String URL_end = ".json";
+    final String URL_NEW_STORIES = "https://hacker-news.firebaseio.com/v0/newstories";
+    final String URL_ITEM = "https://hacker-news.firebaseio.com/v0/item/";
+
+    //firebase
+    Firebase ref;
+
     ListView listview;
-    TextView downloadView;
     ArrayAdapter<String> adapter;
     ArrayList<String> news_URL_list;
     ArrayList<String> news_title_list;
+    ValueEventListener listener;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -44,13 +53,16 @@ public class MainActivity extends AppCompatActivity {
         Toolbar toolbar = (Toolbar) findViewById(R.id.toolbar);
         setSupportActionBar(toolbar);
 
+        Firebase.setAndroidContext(this);
+
+
         listview = (ListView) findViewById(R.id.listView);
-        downloadView = (TextView) findViewById(R.id.downloadView);
         news_URL_list = new ArrayList<>();
         news_title_list = new ArrayList<>();
-
         adapter = new ArrayAdapter<String>(this, android.R.layout.simple_list_item_1, news_title_list);
+
         listview.setAdapter(adapter);
+
         listview.setOnItemClickListener(new AdapterView.OnItemClickListener() {
             @Override
             public void onItemClick(AdapterView<?> adapterView, View view, int position, long l) {
@@ -58,97 +70,53 @@ public class MainActivity extends AppCompatActivity {
                 startActivity(browserIntent);
             }
         });
-
-        new DownloadTask().execute();
     }
 
-    class DownloadTask extends AsyncTask<Void, String, Void>{
+    @Override
+    protected void onResume() {
+        super.onResume();
+        ref = new Firebase(URL_NEW_STORIES);
+        listener = ref.addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(DataSnapshot dataSnapshot) {
+                news_title_list.clear();
+                news_URL_list.clear();
+                for (DataSnapshot idSnapShot : dataSnapshot.getChildren()){
+                    Long id = (Long) idSnapShot.getValue();
+                    Firebase artikel = new Firebase(URL_ITEM + id);
+                    artikel.addListenerForSingleValueEvent(new ValueEventListener() {
+                        @Override
+                        public void onDataChange(DataSnapshot dataSnapshot) {
+                            if (dataSnapshot.child("title").exists() && dataSnapshot.child("url").exists()) {
+                                String title = (String) dataSnapshot.child("title").getValue();
+                                String url = (String) dataSnapshot.child("url").getValue();
+                                news_title_list.add(title);
+                                news_URL_list.add(url);
+                                adapter.notifyDataSetChanged();
+                            }
+                        }
 
-        @Override
-        protected Void doInBackground(Void... voids) {
-            String resArray = "";
-            HttpURLConnection connection = null;
-            InputStream in = null;
-            InputStreamReader reader = null;
+                        @Override
+                        public void onCancelled(FirebaseError firebaseError) {
 
-            try {
-                URL urlIDS = new URL(URL_TOP);
-                connection = (HttpURLConnection) urlIDS.openConnection();
-                in = connection.getInputStream();
-                reader = new InputStreamReader(in);
-                int data = reader.read();
-                while (data != -1){
-                    char c = (char) data;
-                    resArray += c;
-                    data = reader.read();
+                        }
+                    });
                 }
-                Log.i("Hackrnews", resArray);
-                JSONArray jsonArray = new JSONArray(resArray);
-                int index = 0;
-                for (int i = 0; i < jsonArray.length(); i++){
-                    String id = jsonArray.getString(i);
-                    URL wholeURL = new URL(URL_start + id + URL_end);
-                    connection = (HttpURLConnection) wholeURL.openConnection();
-                    in = connection.getInputStream();
-                    reader = new InputStreamReader(in);
-                    String jsonObjectString = "";
-                    data = reader.read();
-                    while (data != -1){
-                        char c = (char) data;
-                        jsonObjectString += c;
-                        data = reader.read();
-                    }
-                    JSONObject jsonObject = new JSONObject(jsonObjectString);
-                    if (jsonObject.has("title") && jsonObject.has("url")){
-                        news_title_list.add(jsonObject.getString("title"));
-                        news_URL_list.add(jsonObject.getString("url"));
-                        publishProgress("Downloaded: " + index);
-                        index++;
-                    }
-                }
-
-            } catch (Exception e){
-                e.printStackTrace();
-            } finally {
-                if (connection != null){
-                    connection.disconnect();
-                }
-                if (in != null){
-                    try {
-                        in.close();
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                }
-                if (reader != null){
-                    try {
-                        reader.close();
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                }
+                Toast.makeText(getApplicationContext(), "Lijst is ververst", Toast.LENGTH_SHORT).show();
             }
 
-            return null;
-        }
+            @Override
+            public void onCancelled(FirebaseError firebaseError) {
 
-        @Override
-        protected void onProgressUpdate(String... values) {
-            super.onProgressUpdate(values);
-            String update = values[0];
-            downloadView.setText(update);
-            downloadView.setVisibility(View.VISIBLE);
-        }
-
-        @Override
-        protected void onPostExecute(Void aVoid) {
-            super.onPostExecute(aVoid);
-            adapter.notifyDataSetChanged();
-            downloadView.setVisibility(View.GONE);
-        }
+            }
+        });
     }
 
-
+    @Override
+    protected void onPause() {
+        super.onPause();
+        ref.removeEventListener(listener);
+    }
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
